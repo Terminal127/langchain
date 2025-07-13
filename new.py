@@ -6,6 +6,7 @@ import uuid
 import json
 import requests
 import subprocess
+import readline
 from datetime import datetime
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
@@ -23,6 +24,35 @@ warnings.filterwarnings("ignore", message="Convert_system_message_to_human will 
 chatmap = {}
 session_id = None
 HISTORY_FILE = "chat_history.json"
+COMMAND_HISTORY_FILE = os.path.expanduser("~/.langchain_chat_history")
+
+def setup_readline():
+    """Setup readline for command history and arrow key support"""
+    try:
+        # Enable tab completion
+        readline.parse_and_bind("tab: complete")
+        
+        # Set history file
+        if os.path.exists(COMMAND_HISTORY_FILE):
+            readline.read_history_file(COMMAND_HISTORY_FILE)
+        
+        # Set maximum history length
+        readline.set_history_length(1000)
+        
+        # Enable arrow keys and command editing
+        readline.parse_and_bind("set editing-mode emacs")
+        readline.parse_and_bind("set show-all-if-ambiguous on")
+        readline.parse_and_bind("set completion-ignore-case on")
+        
+    except Exception as e:
+        print(f"⚠️  Warning: Could not setup readline: {e}")
+
+def save_readline_history():
+    """Save command history to file"""
+    try:
+        readline.write_history_file(COMMAND_HISTORY_FILE)
+    except Exception as e:
+        print(f"⚠️  Warning: Could not save command history: {e}")
 
 # Define tools for the agent
 @tool
@@ -101,29 +131,36 @@ def run_command(command: str) -> str:
         return f"Error: {str(e)}"
 
 @tool
-def search_web(query: str) -> str:
-    """Search the web using DuckDuckGo."""
-    try:
-        from duckduckgo_search import ddg
-        results = ddg(query, max_results=5)
-        
-        if not results:
-            return "No search results found."
-        
-        # Format the results
-        formatted_results = f"Search results for '{query}':\n\n"
-        for i, result in enumerate(results, 1):
-            title = result.get('title', 'No title')
-            body = result.get('body', 'No description')
-            link = result.get('href', 'No link')
-            formatted_results += f"{i}. **{title}**\n   {body}\n   Source: {link}\n\n"
-        
-        return formatted_results
-        
-    except ImportError:
-        return "Error: duckduckgo-search package not installed. Install with: pip install duckduckgo-search"
-    except Exception as e:
-        return f"Search error: {str(e)}"
+def get_chat_history_summary() -> str:
+    """Get a summary of the current chat session history including recent questions and responses."""
+    global chatmap, session_id
+    
+    if session_id not in chatmap or not chatmap[session_id].messages:
+        return "No chat history found in current session."
+    
+    history = chatmap[session_id].messages
+    
+    # Get recent messages (last 10 interactions)
+    recent_messages = history[-20:] if len(history) > 20 else history
+    
+    summary = "Recent chat history:\n"
+    for i, msg in enumerate(recent_messages):
+        role = "User" if msg.type == "human" else "Assistant"
+        content = msg.content[:100] + "..." if len(msg.content) > 100 else msg.content
+        summary += f"{i+1}. {role}: {content}\n"
+    
+    return summary
+
+@tool
+def task_planner(user_request: str) -> str:
+    """Plan out the steps needed to complete a complex user request. Use this when the user asks for multiple things to be done."""
+    # This tool helps the AI think through complex requests step by step
+    return f"Planning steps for: {user_request}\n" \
+           f"1. Identify all requested actions\n" \
+           f"2. Determine which tools are needed\n" \
+           f"3. Execute tools in proper sequence\n" \
+           f"4. Verify all tasks are completed\n" \
+           f"Remember: Actually use the tools, don't just describe what you would do!"
 
 # List of available tools
 tools = [
@@ -132,10 +169,9 @@ tools = [
     get_weather,
     file_operations,
     run_command,
-    search_web
+    get_chat_history_summary,
+    task_planner
 ]
-
-
 
 def load_chat_history():
     """Load chat history from file"""
@@ -206,19 +242,32 @@ def setup_agent_executor(model):
     # Create agent prompt with scratchpad
     prompt = ChatPromptTemplate.from_messages([
         ("system", 
-         "You are a helpful and knowledgeable assistant with access to various tools.\n"
-         "Use the available tools when needed to provide accurate and helpful responses.\n"
-         "Always reply concisely, ideally in 2–3 sentences or short numbered bullet points.\n"
-         "Start your answer with '#'.\n"
-         "If you don't know the answer and no tool can help, say 'I don't know'.\n"
-         "\nAvailable tools:\n"
-         "- get_current_time: Get current date and time\n"
-         "- calculate: Perform mathematical calculations\n"
-         "- get_weather: Get weather information for a city\n"
-         "- file_operations: Read, write, or list files\n"
-         "- run_command: Execute safe shell commands\n"
-         "- search_web: Search for information online\n"
-         "\nWhen using tools, think step by step about what you need to do."),
+         "You are an intelligent assistant with access to powerful tools. You MUST use tools for ANY action you mention.\n\n"
+         
+         "🎯 CORE RULE: If you say you will do something, YOU MUST DO IT using the appropriate tool.\n\n"
+         
+         "📋 AVAILABLE TOOLS & WHEN TO USE:\n"
+         "• get_current_time → When time/date is needed or mentioned\n"
+         "• calculate → For ANY mathematical expression, even simple ones\n" 
+         "• get_weather → When weather information is requested\n"
+         "• file_operations → For reading files, writing/saving content, or listing directories\n"
+         "• run_command → For system info (whoami for username, ls for files, pwd for location, etc.)\n"
+         "• get_chat_history_summary → When asked about previous conversation\n"
+         "• task_planner → For complex multi-step requests\n\n"
+         
+         "🔥 MANDATORY ACTIONS:\n"
+         "1. Use multiple tools in sequence for complex tasks\n\n"
+         
+         "💡 SMART BEHAVIOR:\n"
+         "• Never say 'I will do X' without actually doing X\n\n"
+         
+         "📝 RESPONSE FORMAT:\n"
+         "• Start with '#'\n"
+         "• Be concise (2-3 sentences)\n"
+         "• Execute tools immediately when needed\n"
+         "• Confirm completion of actions\n\n"
+         
+         "⚠️ NEVER say you 'cannot determine' something if a tool can help - USE THE TOOL!"),
         MessagesPlaceholder(variable_name="chat_history"),
         ("human", "{input}"),
         MessagesPlaceholder(variable_name="agent_scratchpad")
@@ -233,7 +282,7 @@ def setup_agent_executor(model):
         tools=tools, 
         verbose=True,
         handle_parsing_errors=True,
-        # max_iterations=3
+        max_iterations=5  # Allow more iterations for complex tasks
     )
     
     # Wrap with message history
@@ -267,8 +316,9 @@ def print_welcome():
     print("✨ Powered by Google Gemini 2.0 Flash with Tools")
     print(f"📱 Session ID: {session_id[:8]}...")
     print("📝 Type your message and press Enter")
-    print("�️  Available Tools: time, calculator, weather, files, commands, search")
-    print("�💡 Commands: /help, /history, /clear, /quit, /tools")
+    print("⌨️  Use ↑/↓ arrow keys to navigate command history")
+    print("🛠️  Available Tools: time, calculator, weather, files, commands, search")
+    print("💡 Commands: /help, /history, /clear, /quit, /tools")
     print("="*60 + "\n")
 
 def print_help():
@@ -286,17 +336,20 @@ def print_help():
 def print_tools():
     """Print available tools"""
     print("\n🛠️  AVAILABLE TOOLS:")
-    print("  get_current_time - Get current date and time")
-    print("  calculate        - Perform mathematical calculations")
-    print("  get_weather      - Get weather information for a city")
-    print("  file_operations  - Read, write, or list files")
-    print("  run_command      - Execute safe shell commands")
-    print("  search_web       - Search for information online")
+    print("  get_current_time      - Get current date and time")
+    print("  calculate             - Perform mathematical calculations")
+    print("  get_weather           - Get weather information for a city")
+    print("  file_operations       - Read, write, or list files")
+    print("  run_command           - Execute safe shell commands")
+    print("  get_chat_history_summary - Access recent chat history")
+    print("  task_planner          - Plan out steps for complex requests")
     print("\n💡 Just ask naturally, like:")
     print("  - 'What time is it?'")
     print("  - 'Calculate 15 * 23 + 7'")
     print("  - 'What's the weather in London?'")
     print("  - 'List files in current directory'")
+    print("  - 'What questions have I asked?'")
+    print("  - 'Create a story and save it to a file'")
     print()
 
 def print_history():
@@ -357,6 +410,9 @@ def main():
         print("   Set it with: export GOOGLE_API_KEY='your-api-key-here'")
         print()
     
+    # Setup readline for command history and arrow keys
+    setup_readline()
+    
     # Load existing chat history
     load_chat_history()
     
@@ -368,8 +424,13 @@ def main():
     
     try:
         while True:
-            # Get user input
-            user_input = input("🧑 You: ").strip()
+            # Get user input with readline support
+            try:
+                user_input = input("🧑 You: ").strip()
+            except EOFError:
+                # Handle Ctrl+D
+                print("\n👋 Goodbye! Thanks for chatting!")
+                break
             
             # Handle empty input
             if not user_input:
@@ -381,6 +442,7 @@ def main():
                 
                 if command == '/quit' or command == '/exit':
                     save_chat_history()  # Save before exiting
+                    save_readline_history()  # Save command history
                     print("👋 Goodbye! Thanks for chatting!")
                     break
                 elif command == '/help':
@@ -411,9 +473,11 @@ def main():
     except KeyboardInterrupt:
         print("\n\n👋 Chat interrupted. Goodbye!")
         save_chat_history()
+        save_readline_history()
     except Exception as e:
         print(f"\n❌ An error occurred: {str(e)}")
         save_chat_history()
+        save_readline_history()
     finally:
         sys.exit(0)
 
