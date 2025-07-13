@@ -102,9 +102,28 @@ def run_command(command: str) -> str:
 
 @tool
 def search_web(query: str) -> str:
-    """Search the web for information (mock implementation)."""
-    # This is a mock implementation - you'd need to integrate with a real search API
-    return f"Mock search results for '{query}': Here are some relevant links and information..."
+    """Search the web using DuckDuckGo."""
+    try:
+        from duckduckgo_search import ddg
+        results = ddg(query, max_results=5)
+        
+        if not results:
+            return "No search results found."
+        
+        # Format the results
+        formatted_results = f"Search results for '{query}':\n\n"
+        for i, result in enumerate(results, 1):
+            title = result.get('title', 'No title')
+            body = result.get('body', 'No description')
+            link = result.get('href', 'No link')
+            formatted_results += f"{i}. **{title}**\n   {body}\n   Source: {link}\n\n"
+        
+        return formatted_results
+        
+    except ImportError:
+        return "Error: duckduckgo-search package not installed. Install with: pip install duckduckgo-search"
+    except Exception as e:
+        return f"Search error: {str(e)}"
 
 # List of available tools
 tools = [
@@ -214,7 +233,7 @@ def setup_agent_executor(model):
         tools=tools, 
         verbose=True,
         handle_parsing_errors=True,
-        max_iterations=3
+        # max_iterations=3
     )
     
     # Wrap with message history
