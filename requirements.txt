@@ -1,0 +1,9 @@
+webexteamssdk
+requests
+fastapi
+uvicorn[standard]
+langchain
+langchain-google-genai
+langchain-core
+langsmith
+langchain-community
