@@ -241,38 +241,30 @@ def setup_agent_executor(model):
     """Setup the LangChain agent executor with tools and chat history"""
     # Create agent prompt with scratchpad
     prompt = ChatPromptTemplate.from_messages([
-        ("system", 
-         "You are an intelligent assistant with access to powerful tools. You MUST use tools for ANY action you mention.\n\n"
-         
-         "🎯 CORE RULE: If you say you will do something, YOU MUST DO IT using the appropriate tool.\n\n"
-         
-         "📋 AVAILABLE TOOLS & WHEN TO USE:\n"
-         "• get_current_time → When time/date is needed or mentioned\n"
-         "• calculate → For ANY mathematical expression, even simple ones\n" 
-         "• get_weather → When weather information is requested\n"
-         "• file_operations → For reading files, writing/saving content, or listing directories\n"
-         "• run_command → For system info (whoami for username, ls for files, pwd for location, etc.)\n"
-         "• get_chat_history_summary → When asked about previous conversation\n"
-         "• task_planner → For complex multi-step requests\n\n"
-         
-         "🔥 MANDATORY ACTIONS:\n"
-         "1. Use multiple tools in sequence for complex tasks\n\n"
-         
-         "💡 SMART BEHAVIOR:\n"
-         "• Never say 'I will do X' without actually doing X\n\n"
-         
-         "📝 RESPONSE FORMAT:\n"
-         "• Start with '#'\n"
-         "• Be concise (2-3 sentences)\n"
-         "• Execute tools immediately when needed\n"
-         "• Confirm completion of actions\n\n"
-         
-         "⚠️ NEVER say you 'cannot determine' something if a tool can help - USE THE TOOL!"),
+        ("system", """You are an intelligent AI assistant. Your primary goal is to provide helpful, accurate, and direct responses to user queries.
+
+CRITICAL INSTRUCTIONS:
+1. **Answer directly from your knowledge**: For general questions, explanations, definitions, coding help, and factual information, respond directly using your existing knowledge. DO NOT use tools unnecessarily.
+
+2. **Use tools ONLY when necessary**:
+   - Use `get_current_time` for current date/time queries
+   - Use `calculate` for mathematical computations
+   - Use `get_weather` for weather information
+   - Use `file_operations` ONLY when user explicitly asks to save, read, write, or manage files
+   - Use `run_command` for system commands
+   - Use `get_chat_history_summary` when asked about conversation history
+
+3. **File operations rule**: NEVER use file_operations unless the user explicitly uses words like "save", "write to file", "read file", "create file", or "list files". Do NOT use it as a thinking step or to store information unnecessarily.
+
+4. **Be conversational**: Respond naturally and directly. Don't announce your plans or explain what you're going to do unless asked.
+
+5. **Stay focused**: Answer the user's question directly without unnecessary elaboration unless they ask for more details.
+
+Remember: Your intelligence comes from providing direct, helpful answers, not from using tools unnecessarily."""),
         MessagesPlaceholder(variable_name="chat_history"),
         ("human", "{input}"),
         MessagesPlaceholder(variable_name="agent_scratchpad")
     ])
-    
     # Create the agent
     agent = create_tool_calling_agent(model, tools, prompt)
     
